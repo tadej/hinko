@@ -1,0 +1,2 @@
+# hinko
+Slack bot
