@@ -27,6 +27,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ import (
 
 func main() {
 
-	token := "xoxb-3449240089-534667652646-i0dKFCTxYiiTA0nFY1jqWhbr" //os.Getenv("SLACK_TOKEN")
+	token := os.Getenv("SLACK_TOKEN")
 	api := slack.New(token)
 	rtm := api.NewRTM()
 	go rtm.ManageConnection()
