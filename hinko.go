@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/nlopes/slack"
+	"github.com/syndtr/goleveldb/leveldb"
 )
 
 func main() {
@@ -41,20 +42,24 @@ func main() {
 	rtm := api.NewRTM()
 	go rtm.ManageConnection()
 
+	db, err := leveldb.OpenFile("database.lvl", nil)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 Loop:
 	for {
 		select {
 		case msg := <-rtm.IncomingEvents:
 			switch ev := msg.Data.(type) {
 			case *slack.ConnectedEvent:
-				//fmt.Println("Connection counter:", ev.ConnectionCount)
 
 			case *slack.MessageEvent:
 				info := rtm.GetInfo()
 
 				user, err := api.GetUserInfo(ev.User)
 				if err != nil {
-					//fmt.Printf("%s %s\n", ev.User, err)
 					continue
 				}
 
@@ -63,7 +68,7 @@ Loop:
 				prefix := fmt.Sprintf("<@%s> ", info.User.ID)
 
 				if ev.User != info.User.ID {
-					respond(info.User.ID, rtm, ev, prefix, user.ID, directMessage)
+					respond(db, info.User.ID, rtm, ev, prefix, user.ID, directMessage)
 				}
 
 			case *slack.RTMError:
@@ -77,6 +82,26 @@ Loop:
 			}
 		}
 	}
+	defer db.Close()
+}
+
+func getDBValue(db *leveldb.DB, key string) (string, error) {
+	data, err := db.Get([]byte(key), nil)
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+	return string(data), nil
+}
+
+func setDBValue(db *leveldb.DB, key string, value string) error {
+	err := db.Put([]byte(key), []byte(value), nil)
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	return nil
 }
 
 func isIMChannel(api *slack.Client, channel string) bool {
@@ -94,7 +119,7 @@ func isIMChannel(api *slack.Client, channel string) bool {
 	return ret
 }
 
-func respond(botID string, rtm *slack.RTM, msg *slack.MessageEvent, prefix string, user string, directMessage bool) {
+func respond(db *leveldb.DB, botID string, rtm *slack.RTM, msg *slack.MessageEvent, prefix string, user string, directMessage bool) {
 	var response string
 	text := msg.Text
 
@@ -105,7 +130,7 @@ func respond(botID string, rtm *slack.RTM, msg *slack.MessageEvent, prefix strin
 	var mentionedBot = strings.HasPrefix(msg.Text, "<@"+botID+">")
 
 	if directMessage || mentionedBot {
-		response = processMessage(text, user, directMessage, msg, rtm)
+		response = processMessage(text, user, directMessage, msg, rtm, db)
 		if response != "" {
 			rtm.SendMessage(rtm.NewOutgoingMessage(response, msg.Channel))
 		}
@@ -137,7 +162,7 @@ func getSharkString(pos int, len int, right bool) string {
 	return ret
 }
 
-func getAnimation(i int) string {
+func getAnimationFrame(i int) string {
 	frames := [4]string{
 		"╔════╤╤╤╤════╗\n" +
 			"║    │││ \\   ║\n" +
@@ -159,7 +184,95 @@ func getAnimation(i int) string {
 	return frames[i%len(frames)]
 }
 
-func processMessage(message string, userID string, directMessage bool, msg *slack.MessageEvent, rtm *slack.RTM) string {
+func sharkProc(channel string, rtm *slack.RTM, len int, maxTurns int) {
+	var shark string
+	var right bool
+
+	right = false
+	shark = getSharkString(0, len, right)
+
+	retChan, retTimeStamp, err := rtm.PostMessage(channel, slack.MsgOptionText(shark, false), slack.MsgOptionAsUser(true))
+	if err != nil {
+		fmt.Printf("%s\n", err)
+		return
+	}
+
+	for turns := 0; turns < maxTurns; turns++ {
+		right = !right
+		for i := 1; i < len-1; i++ {
+			timer := time.NewTimer(100 * time.Millisecond)
+			<-timer.C
+			var newMsg string
+			if right {
+				newMsg = getSharkString(i, len, right)
+			} else {
+				newMsg = getSharkString(len-i, len, right)
+			}
+			_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
+			if err != nil {
+				fmt.Printf("%s\n", err)
+			}
+		}
+	}
+	newMsg := getSharkString(-1, len, right)
+	_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
+	if err != nil {
+		fmt.Printf("%s\n", err)
+		return
+	}
+}
+
+func animateProc(channel string, rtm *slack.RTM, len int) {
+	var anim string
+	anim = getAnimationFrame(0)
+	retChan, retTimeStamp, err := rtm.PostMessage(channel, slack.MsgOptionText(anim, false), slack.MsgOptionAsUser(true))
+	if err != nil {
+		fmt.Printf("%s\n", err)
+		return
+	}
+
+	for i := 1; i < len; i++ {
+		timer := time.NewTimer(100 * time.Millisecond)
+		<-timer.C
+		var newMsg string
+		newMsg = getAnimationFrame(i)
+		_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
+		if err != nil {
+			fmt.Printf("%s\n", err)
+			return
+		}
+	}
+}
+
+func addReaction(msg *slack.MessageEvent, reaction string, rtm *slack.RTM) {
+	var itemRef slack.ItemRef
+	itemRef.Channel = msg.Channel
+	itemRef.Timestamp = msg.Timestamp
+	err := rtm.AddReaction(reaction, itemRef)
+	if err != nil {
+		fmt.Printf("%s\n", err)
+		return
+	}
+}
+
+func getInfoMessage() string {
+	infoMessage :=
+		`********************************
+*Hinko the friendly Slack Bot*
+********************************	
+COMMANDS
+help
+put key value
+get key
+shark
+animate
+
+https://github.com/tadej/hinko
+`
+	return infoMessage
+}
+
+func processMessage(message string, userID string, directMessage bool, msg *slack.MessageEvent, rtm *slack.RTM, db *leveldb.DB) string {
 	var returnMessage string
 	var prefix string
 
@@ -168,78 +281,61 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 		prefix = "<@" + userID + "> "
 	}
 
-	if strings.HasPrefix(message, "teams") {
+	parts := strings.Split(message, " ")
 
-	} else if strings.HasPrefix(message, "animate") {
-		var anim string
-		anim = getAnimation(0)
-		len := 30
-		retChan, retTimeStamp, err := rtm.PostMessage(msg.Channel, slack.MsgOptionText(anim, false), slack.MsgOptionAsUser(true))
-		if err != nil {
-			fmt.Printf("%s\n", err)
+	acceptedCommands := map[string]bool{
+		"put":     true,
+		"get":     true,
+		"shark":   true,
+		"animate": true,
+		"help":    true,
+	}
+
+	emojiCommandNotFound := "shrug"
+	emojiParametersWrong := "heavy_multiplication_x"
+	emojiCommandError := "bug"
+	emojiCommandOK := "heavy_check_mark"
+	emojiCommandWarning := "grey_question"
+
+	infoMessage := getInfoMessage()
+
+	if len(parts) < 1 || !acceptedCommands[parts[0]] {
+		addReaction(msg, emojiCommandNotFound, rtm)
+	}
+
+	switch parts[0] {
+	case "help":
+		return infoMessage
+	case "put":
+		if len(parts) < 3 {
+			addReaction(msg, emojiParametersWrong, rtm)
 			return ""
-		}
-
-		for i := 1; i < len; i++ {
-			timer := time.NewTimer(100 * time.Millisecond)
-			<-timer.C
-			var newMsg string
-			newMsg = getAnimation(i)
-			_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
-			if err != nil {
-				fmt.Printf("%s\n", err)
-				return ""
+		} else {
+			err := setDBValue(db, parts[1], strings.TrimPrefix(message, parts[0]+" "+parts[1]+" "))
+			if err == nil {
+				addReaction(msg, emojiCommandOK, rtm)
+			} else {
+				addReaction(msg, emojiCommandError, rtm)
 			}
 		}
-	} else if strings.HasPrefix(message, "shark") {
-		var shark string
-		var right bool
-
-		len := 30
-		maxTurns := 4
-
-		right = false
-		shark = getSharkString(0, len, right)
-
-		retChan, retTimeStamp, err := rtm.PostMessage(msg.Channel, slack.MsgOptionText(shark, false), slack.MsgOptionAsUser(true))
-		if err != nil {
-			fmt.Printf("%s\n", err)
+	case "get":
+		if len(parts) < 2 {
+			addReaction(msg, emojiParametersWrong, rtm)
 			return ""
-		}
-
-		for turns := 0; turns < maxTurns; turns++ {
-			right = !right
-			for i := 1; i < len-1; i++ {
-				timer := time.NewTimer(100 * time.Millisecond)
-				<-timer.C
-				var newMsg string
-				if right {
-					newMsg = getSharkString(i, len, right)
-				} else {
-					newMsg = getSharkString(len-i, len, right)
-				}
-				_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
-				if err != nil {
-					fmt.Printf("%s\n", err)
-					return ""
-				}
+		} else {
+			data, err := getDBValue(db, parts[1])
+			if err == nil {
+				returnMessage = data
+			} else {
+				addReaction(msg, emojiCommandWarning, rtm)
 			}
 		}
-		newMsg := getSharkString(-1, len, right)
-		_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
-		if err != nil {
-			fmt.Printf("%s\n", err)
-			return ""
-		}
-	} else {
-		var itemRef slack.ItemRef
-		itemRef.Channel = msg.Channel
-		itemRef.Timestamp = msg.Timestamp
-		err := rtm.AddReaction("shrug", itemRef)
-		if err != nil {
-			fmt.Printf("%s\n", err)
-			return ""
-		}
+	case "shark":
+		go sharkProc(msg.Channel, rtm, 30, 2)
+	case "animate":
+		go animateProc(msg.Channel, rtm, 30)
+	default:
+
 	}
 
 	if returnMessage != "" {
