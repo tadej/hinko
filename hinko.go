@@ -278,6 +278,7 @@ func getInfoMessage() string {
 			"`randomteams teamsize group`\n" +
 			"`shark`\n" +
 			"`animate`\n\n" +
+			" reserved groups: _pairnames_, _teamnames_\n\n" +
 			"More info:\nhttps://github.com/tadej/hinko"
 
 	return infoMessage
@@ -293,14 +294,18 @@ func shuffle(vals []string) {
 	}
 }
 
-func getRandomTeams(teamSize int, members []string, membersCanRepeat bool) (string, error) {
-	ret := ""
+func getRandomTeams(teamSize int, members []string, membersCanRepeat bool, teamNames []string, shuffleTeamNames bool) (string, error) {
+	ret := "\n"
 
 	if teamSize > len(members)/2 {
 		return "", errors.New("Team size can't be more than half the group size")
 	}
 
 	shuffle(members)
+
+	if shuffleTeamNames {
+		shuffle(teamNames)
+	}
 
 	d := len(members) % teamSize
 
@@ -327,7 +332,11 @@ func getRandomTeams(teamSize int, members []string, membersCanRepeat bool) (stri
 			} else {
 				teamIndex++
 				currentTeamSize = 0
-				ret += "`Team " + strconv.Itoa(teamIndex) + "`: "
+				if teamIndex-1 < len(teamNames) {
+					ret += "\n" + teamNames[teamIndex-1] + ": "
+				} else {
+					ret += "\nTeam " + strconv.Itoa(teamIndex) + ": "
+				}
 			}
 		}
 		ret += member + " "
@@ -518,7 +527,9 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 			members = parts[1:]
 		}
 
-		returnMessage, err = getRandomTeams(2, members, true)
+		teamNames, _ := getGroup("pairnames", db)
+
+		returnMessage, err = getRandomTeams(2, members, true, teamNames, false)
 		if err != nil {
 			addReaction(msg, emojiParametersWrong, rtm)
 			return ""
@@ -549,7 +560,9 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 			members = parts[2:]
 		}
 
-		returnMessage, err = getRandomTeams(teamSize, members, false)
+		teamNames, _ := getGroup("teamnames", db)
+
+		returnMessage, err = getRandomTeams(teamSize, members, false, teamNames, true)
 		if err != nil {
 			addReaction(msg, emojiParametersWrong, rtm)
 			return ""
