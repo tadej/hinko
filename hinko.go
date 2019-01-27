@@ -94,7 +94,7 @@ func processMessage(message string, msg slack.MessageInfo) string {
 	if len(parts) > 0 {
 		fn := commands.AcceptedCommands[parts[0]]
 		if fn != nil {
-			return prefix + fn(parts, msg)
+			return fn(parts, msg)
 		}
 	}
 
