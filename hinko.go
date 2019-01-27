@@ -26,7 +26,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -281,14 +283,62 @@ func getInfoMessage() string {
 	return infoMessage
 }
 
-func getRandomTeams(teamSize int, members []string) string {
-	var ret string
+func shuffle(vals []string) {
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	for len(vals) > 0 {
+		n := len(vals)
+		randIndex := r.Intn(n)
+		vals[n-1], vals[randIndex] = vals[randIndex], vals[n-1]
+		vals = vals[:n-1]
+	}
+}
 
-	// for i, member := range members {
-	// 	fmt.Println(i, member)
-	// }
+func getRandomTeams(teamSize int, members []string, membersCanRepeat bool) (string, error) {
+	ret := ""
 
-	return ret
+	if teamSize > len(members)/2 {
+		return "", errors.New("Team size can't be more than half the group size")
+	}
+
+	shuffle(members)
+
+	d := len(members) % teamSize
+
+	if d != 0 && membersCanRepeat {
+		add := (teamSize - d)
+		newMembers := make([]string, len(members)+add)
+		copy(newMembers, members)
+
+		if d != 0 && membersCanRepeat {
+			for i := 0; i < add; i++ {
+				newMembers[len(members)+i] = members[i]
+			}
+		}
+		members = newMembers
+	}
+
+	teamIndex := 0
+	currentTeamSize := 0
+
+	for i, member := range members {
+		if i%teamSize == 0 {
+			if i == len(members)-1 {
+				ret += "➕ "
+			} else {
+				teamIndex++
+				currentTeamSize = 0
+				ret += "`Team " + strconv.Itoa(teamIndex) + "`: "
+			}
+		}
+		ret += member + " "
+		currentTeamSize++
+	}
+
+	if currentTeamSize < teamSize {
+		ret += "➕❓"
+	}
+
+	return ret, nil
 }
 
 func getGroup(name string, db *leveldb.DB) ([]string, error) {
@@ -435,6 +485,10 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 				addReaction(msg, emojiParametersWrong, rtm)
 				return ""
 			}
+		default:
+			addReaction(msg, emojiParametersWrong, rtm)
+			return ""
+
 		}
 
 		addReaction(msg, emojiCommandOK, rtm)
@@ -444,7 +498,31 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 			addReaction(msg, emojiParametersWrong, rtm)
 			return ""
 		}
-		returnMessage = "👪 `" + parts[1] + "` members: " + strings.Join(groupTest, " ")
+		returnMessage = "`" + parts[1] + "` members: " + strings.Join(groupTest, " ")
+	case "randompairs":
+		if len(parts) < 2 {
+			addReaction(msg, emojiParametersWrong, rtm)
+			return ""
+		}
+
+		var members []string
+		var err error
+		// only one parameter means group name
+		if len(parts) == 2 {
+			members, err = getGroup(parts[1], db)
+			if err != nil {
+				addReaction(msg, emojiParametersWrong, rtm)
+				return ""
+			}
+		} else {
+			members = parts[1:]
+		}
+
+		returnMessage, err = getRandomTeams(2, members, true)
+		if err != nil {
+			addReaction(msg, emojiParametersWrong, rtm)
+			return ""
+		}
 
 	case "randomteams":
 		if len(parts) < 3 {
@@ -471,7 +549,11 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 			members = parts[2:]
 		}
 
-		returnMessage = getRandomTeams(teamSize, members)
+		returnMessage, err = getRandomTeams(teamSize, members, false)
+		if err != nil {
+			addReaction(msg, emojiParametersWrong, rtm)
+			return ""
+		}
 
 	case "put":
 		if len(parts) < 3 {
