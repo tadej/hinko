@@ -38,19 +38,8 @@ import (
 	"github.com/tadej/hinko/slack"
 )
 
+// function fignature — all command processing functions adhere to this format
 type processCommand func([]string, slack.MessageInfo) string
-
-var emojiCommandNotFound = "shrug"                  // 🤷‍♀️
-var emojiParametersWrong = "heavy_multiplication_x" // ✖️
-var emojiCommandError = "bug"                       // 🐛
-var emojiCommandOK = "heavy_check_mark"             // ✔️
-var emojiCommandWarning = "grey_question"           // ❔
-
-// this DB key contains a list of space-delimited team names
-var teamNamesGroup = "teamnames"
-
-// this DB key contains a list of space-delimited pair names
-var pairNamesGroup = "pairnames"
 
 // accepted text commands with their corresponding processor functions
 var acceptedCommands = map[string]processCommand{
@@ -64,6 +53,28 @@ var acceptedCommands = map[string]processCommand{
 	"group":       processCommandGroup,
 	"ascii":       processCommandASCII,
 }
+
+// accepted text group subcommands with their corresponding processor functions
+var acceptedGroupSubCommands = map[string]processCommand{
+	"set":    processCommandGroupSet,
+	"create": processCommandGroupSet,
+	"add":    processCommandGroupAdd,
+	"remove": processCommandGroupRemove,
+	"list":   processCommandGroupList,
+}
+
+// slack emojis used for reactions
+var emojiCommandNotFound = "shrug"                  // 🤷‍♀️
+var emojiParametersWrong = "heavy_multiplication_x" // ✖️
+var emojiCommandError = "bug"                       // 🐛
+var emojiCommandOK = "heavy_check_mark"             // ✔️
+var emojiCommandWarning = "grey_question"           // ❔
+
+// this DB key contains a list of space-delimited team names
+var teamNamesGroup = "teamnames"
+
+// this DB key contains a list of space-delimited pair names
+var pairNamesGroup = "pairnames"
 
 func main() {
 	token := os.Getenv("SLACK_TOKEN")
@@ -173,6 +184,7 @@ func processCommandASCII(parts []string, msg slack.MessageInfo) string {
 }
 
 func processCommandShark(parts []string, msg slack.MessageInfo) string {
+	// sending functon bodies as parameter so ascii doesn't have to know "slack"
 	go ascii.DoSharkAnimation(30, 2, 300,
 		func(txt string) (string, string) {
 			channel, timestamp, _ := slack.PostMessage(msg.Channel, txt)
@@ -185,6 +197,7 @@ func processCommandShark(parts []string, msg slack.MessageInfo) string {
 }
 
 func processCommandAnimate(parts []string, msg slack.MessageInfo) string {
+	// sending functon bodies as parameter so ascii doesn't have to know "slack"
 	go ascii.DoFrameAnimation(30, 300,
 		func(txt string) (string, string) {
 			channel, timestamp, _ := slack.PostMessage(msg.Channel, txt)
@@ -196,54 +209,52 @@ func processCommandAnimate(parts []string, msg slack.MessageInfo) string {
 	return ""
 }
 
-func processCommandGroup(parts []string, msg slack.MessageInfo) string {
-	var returnMessage string
+func processCommandGroupList(parts []string, msg slack.MessageInfo) string {
+	group, err := model.GetGroup(parts[1])
+	if err != nil {
+		react(msg, emojiCommandWarning)
+		return ""
+	}
+	return "`" + parts[1] + "` members: " + strings.Join(group, " ")
+}
 
+func processCommandGroupSet(parts []string, msg slack.MessageInfo) string {
+	processGroupCommandError(model.SetGroup(parts[1], parts[3:]), msg, true)
+	return ""
+}
+
+func processCommandGroupAdd(parts []string, msg slack.MessageInfo) string {
+	processGroupCommandError(model.AddToGroup(parts[1], parts[3:]), msg, true)
+	return ""
+}
+
+func processCommandGroupRemove(parts []string, msg slack.MessageInfo) string {
+	processGroupCommandError(model.RemoveFromGroup(parts[1], parts[3:]), msg, true)
+	return ""
+}
+
+func processGroupCommandError(err error, msg slack.MessageInfo, confirmSuccess bool) {
+	if err != nil {
+		react(msg, emojiCommandWarning)
+	} else if confirmSuccess {
+		react(msg, emojiCommandOK)
+	}
+}
+
+func processCommandGroup(parts []string, msg slack.MessageInfo) string {
 	if len(parts) < 3 {
 		react(msg, emojiParametersWrong)
 		return ""
 	}
 
-	groupName := parts[1]
+	fn := acceptedGroupSubCommands[parts[2]]
 
-	switch parts[2] {
-	case "list":
-
-	case "create":
-		err := model.SetGroup(groupName, parts[3:])
-		if err != nil {
-			react(msg, emojiParametersWrong)
-			return ""
-		}
-	case "add":
-		err := model.AddToGroup(groupName, parts[3:])
-		if err != nil {
-			react(msg, emojiParametersWrong)
-			return ""
-		}
-
-	case "remove":
-		err := model.RemoveFromGroup(groupName, parts[3:])
-		if err != nil {
-			react(msg, emojiParametersWrong)
-			return ""
-		}
-	default:
-		react(msg, emojiParametersWrong)
-		return ""
-
+	if fn != nil {
+		return fn(parts, msg)
 	}
 
 	react(msg, emojiCommandOK)
-
-	groupTest, err := model.GetGroup(parts[1])
-	if err != nil {
-		react(msg, emojiParametersWrong)
-		return ""
-	}
-	returnMessage = "`" + parts[1] + "` members: " + strings.Join(groupTest, " ")
-
-	return returnMessage
+	return ""
 }
 
 func processCommandRandomPairs(parts []string, msg slack.MessageInfo) string {
@@ -256,6 +267,7 @@ func processCommandRandomPairs(parts []string, msg slack.MessageInfo) string {
 
 	var members []string
 	var err error
+
 	// only one parameter means group name
 	if len(parts) == 2 {
 		members, err = model.GetGroup(parts[1])
@@ -322,7 +334,7 @@ func processCommandPut(parts []string, msg slack.MessageInfo) string {
 		return ""
 	}
 
-	err := model.SetDBValue(parts[1], parts[2])
+	err := model.SetDBValue(parts[1], strings.Join(parts[2:], " "))
 	if err == nil {
 		react(msg, emojiCommandOK)
 	} else {
