@@ -45,7 +45,7 @@ func main() {
 	rtm := api.NewRTM()
 	go rtm.ManageConnection()
 
-	db, err := leveldb.OpenFile("database.lvl", nil)
+	db, err := leveldb.OpenFile("/tmp/database.lvl", nil)
 	if err != nil {
 		fmt.Println(err)
 		return
