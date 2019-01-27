@@ -1,10 +1,12 @@
-# slack bot hinko
+# hinko (slack bot)
 ## intro
 My weekend project aimed to help me learn Go while having some fun.
 
-Takes advantage of goroutines, channels, function signatures, etc.
+Makes good use of goroutines, channels, function signatures, slices, etc.
 
-Uses a database (leveldb), downloads images from the web and converts them to ASCII, plays simultaneous ASCII animations (by posting and editing a message in the channel), etc. Enjoy!
+Uses a database (leveldb), downloads images from the web and converts them to ASCII, plays simultaneous ASCII animations (by posting and editing a message in the channel), etc. 
+
+Enjoy!
 
 ![screenshot](https://github.com/tadej/hinko/blob/master/images/hinko-screen-1.png "screenshot")
 
