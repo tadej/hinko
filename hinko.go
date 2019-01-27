@@ -27,7 +27,7 @@ package main
 
 import (
 	"fmt"
-	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,7 +37,7 @@ import (
 
 func main() {
 
-	token := os.Getenv("SLACK_TOKEN")
+	token := "xoxb-3449240089-534667652646-e2mvkhcP55V89QhAR9eI1an8" //os.Getenv("SLACK_TOKEN")
 	api := slack.New(token)
 	rtm := api.NewRTM()
 	go rtm.ManageConnection()
@@ -125,7 +125,6 @@ func respond(db *leveldb.DB, botID string, rtm *slack.RTM, msg *slack.MessageEve
 
 	text = strings.TrimPrefix(text, prefix)
 	text = strings.TrimSpace(text)
-	text = strings.ToLower(text)
 
 	var mentionedBot = strings.HasPrefix(msg.Text, "<@"+botID+">")
 
@@ -165,7 +164,7 @@ func getSharkString(pos int, len int, right bool) string {
 func getAnimationFrame(i int) string {
 	frames := [4]string{
 		"╔════╤╤╤╤════╗\n" +
-			"║    │││ \\   ║\n" +
+			"║    │││ \\  ║\n" +
 			"║    │││  O  ║\n" +
 			"║    OOO     ║",
 		"╔════╤╤╤╤════╗\n" +
@@ -245,31 +244,127 @@ func animateProc(channel string, rtm *slack.RTM, len int) {
 }
 
 func addReaction(msg *slack.MessageEvent, reaction string, rtm *slack.RTM) {
+	if msg.Username == "slackbot" {
+		return
+	}
+
 	var itemRef slack.ItemRef
 	itemRef.Channel = msg.Channel
 	itemRef.Timestamp = msg.Timestamp
+
 	err := rtm.AddReaction(reaction, itemRef)
 	if err != nil {
-		fmt.Printf("%s\n", err)
+		fmt.Printf("Adding reaction, %s\n", err)
 		return
 	}
 }
 
 func getInfoMessage() string {
 	infoMessage :=
-		`********************************
-*Hinko the friendly Slack Bot*
-********************************	
-COMMANDS
-help
-put key value
-get key
-shark
-animate
+		`Try the following commands:` + "\n" +
+			"`help`\n" +
+			"`put key value`\n" +
+			"`get key`\n" +
+			"`group groupname list`\n" +
+			"`group groupname create @user1 @user2 @user3 ...`\n" +
+			"`group groupname add @user1 @user2 @user3 ...`\n" +
+			"`group groupname remove @user1 @user2 @user3 ...`\n" +
+			"`randompairs @user1 @user2 @user3 ...`\n" +
+			"`randompairs group`\n" +
+			"`randomteams teamsize @user1 @user2 @user3 ...`\n" +
+			"`randomteams teamsize group`\n" +
+			"`shark`\n" +
+			"`animate`\n\n" +
+			"More info:\nhttps://github.com/tadej/hinko"
 
-https://github.com/tadej/hinko
-`
 	return infoMessage
+}
+
+func getRandomTeams(teamSize int, members []string) string {
+	var ret string
+
+	// for i, member := range members {
+	// 	fmt.Println(i, member)
+	// }
+
+	return ret
+}
+
+func getGroup(name string, db *leveldb.DB) ([]string, error) {
+	group, err := getDBValue(db, "[group::"+name+"]")
+
+	if err != nil {
+		return nil, err
+	}
+
+	members := strings.Split(group, " ")
+
+	return members, nil
+}
+
+func setGroup(name string, members []string, db *leveldb.DB) error {
+	err := setDBValue(db, "[group::"+name+"]", strings.Join(members, " "))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func contains(s []string, e string) bool {
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
+}
+
+func addToGroup(name string, members []string, db *leveldb.DB) error {
+	existingGroup, err := getGroup(name, db)
+	if err != nil {
+		return err
+	}
+
+	str := strings.Join(existingGroup, " ")
+
+	str = strings.Trim(str, " ")
+
+	for _, m := range members {
+		if !contains(existingGroup, m) {
+			str += " " + m
+		}
+	}
+
+	str = strings.Trim(str, " ")
+
+	err = setDBValue(db, "[group::"+name+"]", str)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func removeFromGroup(name string, members []string, db *leveldb.DB) error {
+	existingGroup, err := getGroup(name, db)
+	if err != nil {
+		return err
+	}
+
+	str := ""
+
+	for _, m := range existingGroup {
+		if !contains(members, m) {
+			str += " " + m
+		}
+	}
+
+	str = strings.Trim(str, " ")
+
+	err = setDBValue(db, "[group::"+name+"]", str)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func processMessage(message string, userID string, directMessage bool, msg *slack.MessageEvent, rtm *slack.RTM, db *leveldb.DB) string {
@@ -284,58 +379,132 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 	parts := strings.Split(message, " ")
 
 	acceptedCommands := map[string]bool{
-		"put":     true,
-		"get":     true,
-		"shark":   true,
-		"animate": true,
-		"help":    true,
+		"put":         true,
+		"get":         true,
+		"shark":       true,
+		"animate":     true,
+		"help":        true,
+		"randompairs": true,
+		"randomteams": true,
+		"group":       true,
 	}
 
-	emojiCommandNotFound := "shrug"
-	emojiParametersWrong := "heavy_multiplication_x"
-	emojiCommandError := "bug"
-	emojiCommandOK := "heavy_check_mark"
-	emojiCommandWarning := "grey_question"
-
-	infoMessage := getInfoMessage()
+	emojiCommandNotFound := "shrug"                  // 🤷‍♀️
+	emojiParametersWrong := "heavy_multiplication_x" // ✖️
+	emojiCommandError := "bug"                       // 🐛
+	emojiCommandOK := "heavy_check_mark"             // ✔️
+	emojiCommandWarning := "grey_question"           // ❔
 
 	if len(parts) < 1 || !acceptedCommands[parts[0]] {
 		addReaction(msg, emojiCommandNotFound, rtm)
+		return ""
 	}
 
-	switch parts[0] {
+	switch cmd := parts[0]; cmd {
 	case "help":
-		return infoMessage
+		returnMessage = getInfoMessage()
+
+	case "group":
+		if len(parts) < 3 {
+			addReaction(msg, emojiParametersWrong, rtm)
+			return ""
+		}
+
+		groupName := parts[1]
+
+		switch parts[2] {
+		case "list":
+
+		case "create":
+			err := setGroup(groupName, parts[3:], db)
+			if err != nil {
+				addReaction(msg, emojiParametersWrong, rtm)
+				return ""
+			}
+		case "add":
+			err := addToGroup(groupName, parts[3:], db)
+			if err != nil {
+				addReaction(msg, emojiParametersWrong, rtm)
+				return ""
+			}
+
+		case "remove":
+			err := removeFromGroup(groupName, parts[3:], db)
+			if err != nil {
+				addReaction(msg, emojiParametersWrong, rtm)
+				return ""
+			}
+		}
+
+		addReaction(msg, emojiCommandOK, rtm)
+
+		groupTest, err := getGroup(parts[1], db)
+		if err != nil {
+			addReaction(msg, emojiParametersWrong, rtm)
+			return ""
+		}
+		returnMessage = "👪 `" + parts[1] + "` members: " + strings.Join(groupTest, " ")
+
+	case "randomteams":
+		if len(parts) < 3 {
+			addReaction(msg, emojiParametersWrong, rtm)
+			return ""
+		}
+
+		teamSize, err := strconv.Atoi(parts[1])
+		if err != nil {
+			addReaction(msg, emojiParametersWrong, rtm)
+			return ""
+		}
+
+		var members []string
+
+		// only one parameter means group name
+		if len(parts) == 3 {
+			members, err = getGroup(parts[2], db)
+			if err != nil {
+				addReaction(msg, emojiParametersWrong, rtm)
+				return ""
+			}
+		} else {
+			members = parts[2:]
+		}
+
+		returnMessage = getRandomTeams(teamSize, members)
+
 	case "put":
 		if len(parts) < 3 {
 			addReaction(msg, emojiParametersWrong, rtm)
 			return ""
-		} else {
-			err := setDBValue(db, parts[1], strings.TrimPrefix(message, parts[0]+" "+parts[1]+" "))
-			if err == nil {
-				addReaction(msg, emojiCommandOK, rtm)
-			} else {
-				addReaction(msg, emojiCommandError, rtm)
-			}
 		}
+
+		err := setDBValue(db, parts[1], strings.TrimPrefix(message, parts[0]+" "+parts[1]+" "))
+		if err == nil {
+			addReaction(msg, emojiCommandOK, rtm)
+		} else {
+			addReaction(msg, emojiCommandError, rtm)
+		}
+
 	case "get":
 		if len(parts) < 2 {
 			addReaction(msg, emojiParametersWrong, rtm)
 			return ""
-		} else {
-			data, err := getDBValue(db, parts[1])
-			if err == nil {
-				returnMessage = data
-			} else {
-				addReaction(msg, emojiCommandWarning, rtm)
-			}
 		}
+
+		data, err := getDBValue(db, parts[1])
+		if err == nil {
+			returnMessage = data
+		} else {
+			addReaction(msg, emojiCommandWarning, rtm)
+		}
+
 	case "shark":
 		go sharkProc(msg.Channel, rtm, 30, 2)
+
 	case "animate":
 		go animateProc(msg.Channel, rtm, 30)
-	default:
 
+	default:
 	}
 
 	if returnMessage != "" {
