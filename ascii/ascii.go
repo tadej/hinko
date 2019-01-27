@@ -26,7 +26,6 @@ package ascii
 import (
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -129,22 +128,29 @@ func getSharkString(pos int, len int, right bool) string {
 }
 
 // ImageToASCII downloads an image from a URL and returns a code-formatted (``) ASCII representation
-func ImageToASCII(url string) string {
+func ImageToASCII(url string) (string, error) {
+
+	// TG: determined by experimentation that Slack doesn't allow code segments larger than 100x70
+	var slackWidthLimit float64 = 100
+	var slackHeightLimit float64 = 70
+
+	var err error
+
 	url = strings.Trim(url, "<>")
-	response, e := http.Get(url)
-	if e != nil {
-		log.Fatal(e)
+	response, err := http.Get(url)
+	if err != nil {
+		return "", err
 	}
 	defer response.Body.Close()
 
 	bytes, err := ioutil.ReadAll(response.Body)
 	if err != nil {
-		panic("bla")
+		return "", err
 	}
 
 	img, err := asciicanvas.NewImageBufferFromBytes(bytes)
 	if err != nil {
-		panic("cannot read file")
+		return "", err
 	}
 
 	var ratio float64
@@ -156,21 +162,21 @@ func ImageToASCII(url string) string {
 	var canvas *asciicanvas.ImageBuffer
 
 	if img.Width > img.Height {
-		width = 100
-		height = 100 * ratio
-		if height > 70 {
-			height = 70
-			width = 70 / ratio
+		width = slackWidthLimit
+		height = slackWidthLimit * ratio
+		if height > slackHeightLimit {
+			height = slackHeightLimit
+			width = slackHeightLimit / ratio
 		}
-		canvas = asciicanvas.NewImageBuffer(100, 70)
+		canvas = asciicanvas.NewImageBuffer(int(slackWidthLimit), int(slackHeightLimit))
 	} else {
-		height = 100
-		width = 100 / ratio
-		if width > 70 {
-			width = 70
-			height = 70 * ratio
+		height = slackWidthLimit
+		width = slackWidthLimit / ratio
+		if width > slackHeightLimit {
+			width = slackHeightLimit
+			height = slackHeightLimit * ratio
 		}
-		canvas = asciicanvas.NewImageBuffer(70, 100)
+		canvas = asciicanvas.NewImageBuffer(int(slackHeightLimit), int(slackWidthLimit))
 	}
 
 	canvas.Draw(img, 0, 0, width, height) // img, x, y, w, h
@@ -178,5 +184,6 @@ func ImageToASCII(url string) string {
 	str := canvas.String()
 	str = strings.Replace(str, "`", "'", -1)
 	fmt.Printf(str)
-	return "```" + str + "```"
+
+	return "```" + str + "```", err
 }

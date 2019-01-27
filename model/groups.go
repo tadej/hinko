@@ -152,6 +152,8 @@ func GetRandomTeams(teamSize int, members []string, membersCanRepeat bool, teamN
 		members = newMembers
 	}
 
+	// TODO: refactor this a bit. Works but looks messy
+
 	teamIndex := 0
 	currentTeamSize := 0
 
