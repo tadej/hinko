@@ -7,6 +7,8 @@ A Slack bot written in go with its own database that can help you pick random te
 
 It features a number of ASCII art and animation experiments, along with the ability to create custom named groups and put/get values.
 
+The bot uses reactions to confirm commands (or say they don't work) to not spam the channel.
+
 Try the following commands:
 ```help
 put key value
