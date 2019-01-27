@@ -31,7 +31,7 @@ import (
 	"github.com/tadej/hinko/slack"
 )
 
-// ProcessCommand - function fignature — all command processing functions adhere to this format
+// ProcessCommand - function signature — all command processing functions adhere to this format
 type ProcessCommand func([]string, slack.MessageInfo) string
 
 // AcceptedCommands - accepted text commands with their corresponding processor functions
