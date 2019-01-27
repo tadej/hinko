@@ -31,3 +31,7 @@ shark
 animate
 ```
 ![screenshot](https://github.com/tadej/hinko/blob/master/images/hinko-screen-2.png "screenshot")
+
+## How do I get a Slack bot running?
+
+Check out this great tutorial: https://rsmitty.github.io/Slack-Bot/
