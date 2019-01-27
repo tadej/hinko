@@ -90,7 +90,6 @@ func respond(msg slack.MessageInfo) {
 }
 
 func processMessage(message string, msg slack.MessageInfo) string {
-	var returnMessage string
 	var prefix string
 
 	// mention, tag the user in the channel
@@ -102,9 +101,8 @@ func processMessage(message string, msg slack.MessageInfo) string {
 	if len(parts) > 0 {
 		fn := commands.AcceptedCommands[parts[0]]
 		if fn != nil {
-			returnMessage = fn(parts, msg)
+			return prefix + fn(parts, msg)
 		}
-		return prefix + returnMessage
 	}
 
 	// command not supported
