@@ -12,3 +12,5 @@
 *.out
 
 database.lvl/
+
+.DS_Store

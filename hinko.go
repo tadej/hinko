@@ -20,201 +20,132 @@
 //OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //SOFTWARE.
 
-// Thanks to Spencer Smith for the tutorial: https://rsmitty.github.io/Slack-Bot/
-// Thanks https://github.com/nlopes/slack
-
 package main
 
 import (
-	"errors"
 	"fmt"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
-	"math/rand"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
-	"time"
 
-	"github.com/nlopes/slack"
 	"github.com/tadej/hinko/ascii"
 	"github.com/tadej/hinko/model"
+	"github.com/tadej/hinko/slack"
 )
+
+type processCommand func([]string, slack.MessageInfo) string
+
+var emojiCommandNotFound = "shrug"                  // 🤷‍♀️
+var emojiParametersWrong = "heavy_multiplication_x" // ✖️
+var emojiCommandError = "bug"                       // 🐛
+var emojiCommandOK = "heavy_check_mark"             // ✔️
+var emojiCommandWarning = "grey_question"           // ❔
+
+// this DB key contains a list of space-delimited team names
+var teamNamesGroup = "teamnames"
+
+// this DB key contains a list of space-delimited pair names
+var pairNamesGroup = "pairnames"
+
+// accepted text commands with their corresponding processor functions
+var acceptedCommands = map[string]processCommand{
+	"put":         processCommandPut,
+	"get":         processCommandGet,
+	"shark":       processCommandShark,
+	"animate":     processCommandAnimate,
+	"help":        processCommandHelp,
+	"randompairs": processCommandRandomPairs,
+	"randomteams": processCommandRandomTeams,
+	"group":       processCommandGroup,
+	"ascii":       processCommandASCII,
+}
 
 func main() {
 	token := os.Getenv("SLACK_TOKEN")
-	api := slack.New(token)
-	rtm := api.NewRTM()
-	go rtm.ManageConnection()
+	slack.Init(token)
 	model.OpenDatabase("/tmp/model.lvl")
-
-	setupCloseHandler()
+	initInterruptHandler()
 
 	fmt.Println("Starting Slack API loop")
-Loop:
+
+	c := make(chan slack.MessageInfo)
+	go slack.MessageLoop(c)
+
 	for {
-		select {
-		case msg := <-rtm.IncomingEvents:
-			switch ev := msg.Data.(type) {
-			case *slack.ConnectedEvent:
+		message := <-c
 
-			case *slack.MessageEvent:
-				info := rtm.GetInfo()
-
-				user, err := api.GetUserInfo(ev.User)
-				if err != nil {
-					continue
-				}
-
-				var directMessage = isIMChannel(api, ev.Channel)
-
-				prefix := fmt.Sprintf("<@%s> ", info.User.ID)
-
-				if ev.User != info.User.ID {
-					respond(info.User.ID, rtm, ev, prefix, user.ID, directMessage)
-				}
-
-			case *slack.RTMError:
-				fmt.Printf("Error: %s\n\n", ev.Error())
-
-			case *slack.InvalidAuthEvent:
-				fmt.Printf("Invalid credentials")
-				break Loop
-
-			default:
-			}
+		if message.OK {
+			respond(message)
+		} else {
+			break
 		}
 	}
 
 	defer model.CloseDatabase()
 }
 
-// SetupCloseHandler creates a 'listener' on a new goroutine which will notify the
-// program if it receives an interrupt from the OS. We then handle this by calling
-// our clean up procedure and exiting the program.
-func setupCloseHandler() {
+func initInterruptHandler() {
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-c
-		fmt.Println("\r- Ctrl+C pressed in Terminal")
+		fmt.Println("\rctrl+c pressed in terminal")
 		model.CloseDatabase()
 		os.Exit(0)
 	}()
 }
 
-func isIMChannel(api *slack.Client, channel string) bool {
-	var ret bool
-	chans, err := api.GetIMChannels()
-	if err != nil {
-		fmt.Printf("%s\n", err)
-		return false
-	}
-	for _, imchan := range chans {
-		if imchan.ID == channel {
-			ret = true
-		}
-	}
-	return ret
-}
-
-func respond(botID string, rtm *slack.RTM, msg *slack.MessageEvent, prefix string, user string, directMessage bool) {
+func respond(msg slack.MessageInfo) {
 	var response string
-	text := msg.Text
+	text := msg.Message
 
-	text = strings.TrimPrefix(text, prefix)
+	text = strings.TrimPrefix(text, msg.Prefix)
 	text = strings.TrimSpace(text)
 
-	var mentionedBot = strings.HasPrefix(msg.Text, "<@"+botID+">")
+	var mentionedBot = strings.HasPrefix(msg.Message, "<@"+msg.MyID+">")
 
-	if directMessage || mentionedBot {
-		response = processMessage(text, user, directMessage, msg, rtm)
+	if msg.IM || mentionedBot {
+		response = processMessage(text, msg)
 		if response != "" {
-			rtm.SendMessage(rtm.NewOutgoingMessage(response, msg.Channel))
+			slack.SendMessage(msg.Channel, response)
 		}
 	}
 }
 
-func sharkProc(channel string, rtm *slack.RTM, len int, maxTurns int) {
-	var shark string
-	var right bool
+func processMessage(message string, msg slack.MessageInfo) string {
+	var returnMessage string
+	var prefix string
 
-	right = false
-	shark = ascii.GetSharkString(0, len, right)
-
-	retChan, retTimeStamp, err := rtm.PostMessage(channel, slack.MsgOptionText(shark, false), slack.MsgOptionAsUser(true))
-	if err != nil {
-		fmt.Printf("%s\n", err)
-		return
+	// mention, tag the user in the channel
+	if !msg.IM {
+		prefix = "<@" + msg.UserID + ">\n"
 	}
 
-	for turns := 0; turns < maxTurns; turns++ {
-		right = !right
-		for i := 1; i < len-1; i++ {
-			timer := time.NewTimer(100 * time.Millisecond)
-			<-timer.C
-			var newMsg string
-			if right {
-				newMsg = ascii.GetSharkString(i, len, right)
-			} else {
-				newMsg = ascii.GetSharkString(len-i, len, right)
-			}
-			_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
-			if err != nil {
-				fmt.Printf("%s\n", err)
-			}
+	parts := strings.Split(message, " ")
+	if len(parts) > 0 {
+		fn := acceptedCommands[parts[0]]
+		if fn != nil {
+			returnMessage = fn(parts, msg)
 		}
+		return prefix + returnMessage
 	}
-	newMsg := ascii.GetSharkString(-1, len, right)
-	_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
-	if err != nil {
-		fmt.Printf("%s\n", err)
-		return
-	}
+
+	// command not supported
+	react(msg, emojiCommandNotFound)
+
+	return ""
 }
 
-func animateProc(channel string, rtm *slack.RTM, len int) {
-	var anim string
-	anim = ascii.GetAnimationFrame(0)
-	retChan, retTimeStamp, err := rtm.PostMessage(channel, slack.MsgOptionText(anim, false), slack.MsgOptionAsUser(true))
-	if err != nil {
-		fmt.Printf("%s\n", err)
-		return
-	}
-
-	for i := 1; i < len; i++ {
-		timer := time.NewTimer(100 * time.Millisecond)
-		<-timer.C
-		var newMsg string
-		newMsg = ascii.GetAnimationFrame(i)
-		_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
-		if err != nil {
-			fmt.Printf("%s\n", err)
-			return
-		}
-	}
+func react(msg slack.MessageInfo, reaction string) {
+	slack.AddReaction(msg.Username, msg.Channel, msg.Timestamp, reaction)
 }
 
-func addReaction(msg *slack.MessageEvent, reaction string, rtm *slack.RTM) {
-	if msg.Username == "slackbot" {
-		return
-	}
-
-	var itemRef slack.ItemRef
-	itemRef.Channel = msg.Channel
-	itemRef.Timestamp = msg.Timestamp
-
-	err := rtm.AddReaction(reaction, itemRef)
-	if err != nil {
-		fmt.Printf("Adding reaction, %s\n", err)
-		return
-	}
-}
-
-func getInfoMessage() string {
+func processCommandHelp(parts []string, msg slack.MessageInfo) string {
 	infoMessage :=
 		`Try the following commands:` + "\n" +
 			"`help`\n" +
@@ -237,256 +168,183 @@ func getInfoMessage() string {
 	return infoMessage
 }
 
-func shuffle(vals []string) {
-	r := rand.New(rand.NewSource(time.Now().Unix()))
-	for len(vals) > 0 {
-		n := len(vals)
-		randIndex := r.Intn(n)
-		vals[n-1], vals[randIndex] = vals[randIndex], vals[n-1]
-		vals = vals[:n-1]
-	}
+func processCommandASCII(parts []string, msg slack.MessageInfo) string {
+	return ascii.ImageToASCII(parts[1])
 }
 
-func getRandomTeams(teamSize int, members []string, membersCanRepeat bool, teamNames []string, shuffleTeamNames bool) (string, error) {
-	ret := "\n"
+func processCommandShark(parts []string, msg slack.MessageInfo) string {
+	go ascii.DoSharkAnimation(30, 2, 300,
+		func(txt string) (string, string) {
+			channel, timestamp, _ := slack.PostMessage(msg.Channel, txt)
+			return channel, timestamp
+		}, func(channel string, timestamp string, newTxt string) {
+			_ = slack.UpdateMessage(channel, timestamp, newTxt)
+		})
 
-	if teamSize > len(members)/2 {
-		return "", errors.New("Team size can't be more than half the group size")
-	}
-
-	shuffle(members)
-
-	if shuffleTeamNames {
-		shuffle(teamNames)
-	}
-
-	d := len(members) % teamSize
-
-	if d != 0 && membersCanRepeat {
-		add := (teamSize - d)
-		newMembers := make([]string, len(members)+add)
-		copy(newMembers, members)
-
-		if d != 0 && membersCanRepeat {
-			for i := 0; i < add; i++ {
-				newMembers[len(members)+i] = members[i]
-			}
-		}
-		members = newMembers
-	}
-
-	teamIndex := 0
-	currentTeamSize := 0
-
-	for i, member := range members {
-		if i%teamSize == 0 {
-			if i == len(members)-1 {
-				ret += "➕ "
-			} else {
-				teamIndex++
-				currentTeamSize = 0
-				if teamIndex-1 < len(teamNames) {
-					ret += "\n" + teamNames[teamIndex-1] + ": "
-				} else {
-					ret += "\nTeam " + strconv.Itoa(teamIndex) + ": "
-				}
-			}
-		}
-		ret += member + " "
-		currentTeamSize++
-	}
-
-	if currentTeamSize < teamSize {
-		ret += "➕❓"
-	}
-
-	return ret, nil
+	return ""
 }
 
-func processMessage(message string, userID string, directMessage bool, msg *slack.MessageEvent, rtm *slack.RTM) string {
+func processCommandAnimate(parts []string, msg slack.MessageInfo) string {
+	go ascii.DoFrameAnimation(30, 300,
+		func(txt string) (string, string) {
+			channel, timestamp, _ := slack.PostMessage(msg.Channel, txt)
+			return channel, timestamp
+		}, func(channel string, timestamp string, newTxt string) {
+			_ = slack.UpdateMessage(channel, timestamp, newTxt)
+		})
+
+	return ""
+}
+
+func processCommandGroup(parts []string, msg slack.MessageInfo) string {
 	var returnMessage string
-	var prefix string
 
-	// mention, tag the user in the channel
-	if !directMessage {
-		prefix = "<@" + userID + ">\n"
-	}
-
-	parts := strings.Split(message, " ")
-
-	acceptedCommands := map[string]bool{
-		"put":         true,
-		"get":         true,
-		"shark":       true,
-		"animate":     true,
-		"help":        true,
-		"randompairs": true,
-		"randomteams": true,
-		"group":       true,
-		"ascii":       true,
-	}
-
-	emojiCommandNotFound := "shrug"                  // 🤷‍♀️
-	emojiParametersWrong := "heavy_multiplication_x" // ✖️
-	emojiCommandError := "bug"                       // 🐛
-	emojiCommandOK := "heavy_check_mark"             // ✔️
-	emojiCommandWarning := "grey_question"           // ❔
-
-	if len(parts) < 1 || !acceptedCommands[parts[0]] {
-		addReaction(msg, emojiCommandNotFound, rtm)
+	if len(parts) < 3 {
+		react(msg, emojiParametersWrong)
 		return ""
 	}
 
-	switch cmd := parts[0]; cmd {
-	case "help":
-		returnMessage = getInfoMessage()
+	groupName := parts[1]
 
-	case "ascii":
+	switch parts[2] {
+	case "list":
 
-		returnMessage = ascii.ImageToASCII(parts[1])
-
-	case "group":
-		if len(parts) < 3 {
-			addReaction(msg, emojiParametersWrong, rtm)
-			return ""
-		}
-
-		groupName := parts[1]
-
-		switch parts[2] {
-		case "list":
-
-		case "create":
-			err := model.SetGroup(groupName, parts[3:])
-			if err != nil {
-				addReaction(msg, emojiParametersWrong, rtm)
-				return ""
-			}
-		case "add":
-			err := model.AddToGroup(groupName, parts[3:])
-			if err != nil {
-				addReaction(msg, emojiParametersWrong, rtm)
-				return ""
-			}
-
-		case "remove":
-			err := model.RemoveFromGroup(groupName, parts[3:])
-			if err != nil {
-				addReaction(msg, emojiParametersWrong, rtm)
-				return ""
-			}
-		default:
-			addReaction(msg, emojiParametersWrong, rtm)
-			return ""
-
-		}
-
-		addReaction(msg, emojiCommandOK, rtm)
-
-		groupTest, err := model.GetGroup(parts[1])
+	case "create":
+		err := model.SetGroup(groupName, parts[3:])
 		if err != nil {
-			addReaction(msg, emojiParametersWrong, rtm)
+			react(msg, emojiParametersWrong)
 			return ""
 		}
-		returnMessage = "`" + parts[1] + "` members: " + strings.Join(groupTest, " ")
-	case "randompairs":
-		if len(parts) < 2 {
-			addReaction(msg, emojiParametersWrong, rtm)
-			return ""
-		}
-
-		var members []string
-		var err error
-		// only one parameter means group name
-		if len(parts) == 2 {
-			members, err = model.GetGroup(parts[1])
-			if err != nil {
-				addReaction(msg, emojiParametersWrong, rtm)
-				return ""
-			}
-		} else {
-			members = parts[1:]
-		}
-
-		teamNames, _ := model.GetGroup("pairnames")
-
-		returnMessage, err = getRandomTeams(2, members, true, teamNames, false)
+	case "add":
+		err := model.AddToGroup(groupName, parts[3:])
 		if err != nil {
-			addReaction(msg, emojiParametersWrong, rtm)
+			react(msg, emojiParametersWrong)
 			return ""
 		}
 
-	case "randomteams":
-		if len(parts) < 3 {
-			addReaction(msg, emojiParametersWrong, rtm)
-			return ""
-		}
-
-		teamSize, err := strconv.Atoi(parts[1])
+	case "remove":
+		err := model.RemoveFromGroup(groupName, parts[3:])
 		if err != nil {
-			addReaction(msg, emojiParametersWrong, rtm)
+			react(msg, emojiParametersWrong)
 			return ""
 		}
-
-		var members []string
-
-		// only one parameter means group name
-		if len(parts) == 3 {
-			members, err = model.GetGroup(parts[2])
-			if err != nil {
-				addReaction(msg, emojiParametersWrong, rtm)
-				return ""
-			}
-		} else {
-			members = parts[2:]
-		}
-
-		teamNames, _ := model.GetGroup("teamnames")
-
-		returnMessage, err = getRandomTeams(teamSize, members, false, teamNames, true)
-		if err != nil {
-			addReaction(msg, emojiParametersWrong, rtm)
-			return ""
-		}
-
-	case "put":
-		if len(parts) < 3 {
-			addReaction(msg, emojiParametersWrong, rtm)
-			return ""
-		}
-
-		err := model.SetDBValue(parts[1], strings.TrimPrefix(message, parts[0]+" "+parts[1]+" "))
-		if err == nil {
-			addReaction(msg, emojiCommandOK, rtm)
-		} else {
-			addReaction(msg, emojiCommandError, rtm)
-		}
-
-	case "get":
-		if len(parts) < 2 {
-			addReaction(msg, emojiParametersWrong, rtm)
-			return ""
-		}
-
-		data, err := model.GetDBValue(parts[1])
-		if err == nil {
-			returnMessage = data
-		} else {
-			addReaction(msg, emojiCommandWarning, rtm)
-		}
-
-	case "shark":
-		go sharkProc(msg.Channel, rtm, 30, 2)
-
-	case "animate":
-		go animateProc(msg.Channel, rtm, 30)
-
 	default:
+		react(msg, emojiParametersWrong)
+		return ""
+
 	}
 
-	if returnMessage != "" {
-		returnMessage = prefix + returnMessage
+	react(msg, emojiCommandOK)
+
+	groupTest, err := model.GetGroup(parts[1])
+	if err != nil {
+		react(msg, emojiParametersWrong)
+		return ""
+	}
+	returnMessage = "`" + parts[1] + "` members: " + strings.Join(groupTest, " ")
+
+	return returnMessage
+}
+
+func processCommandRandomPairs(parts []string, msg slack.MessageInfo) string {
+	var returnMessage string
+
+	if len(parts) < 2 {
+		react(msg, emojiParametersWrong)
+		return ""
 	}
 
+	var members []string
+	var err error
+	// only one parameter means group name
+	if len(parts) == 2 {
+		members, err = model.GetGroup(parts[1])
+		if err != nil {
+			react(msg, emojiParametersWrong)
+			return ""
+		}
+	} else {
+		members = parts[1:]
+	}
+
+	teamNames, _ := model.GetGroup(pairNamesGroup)
+
+	returnMessage, err = model.GetRandomTeams(2, members, true, teamNames, false)
+	if err != nil {
+		react(msg, emojiParametersWrong)
+		return ""
+	}
+
+	return returnMessage
+}
+
+func processCommandRandomTeams(parts []string, msg slack.MessageInfo) string {
+	var returnMessage string
+
+	if len(parts) < 3 {
+		react(msg, emojiParametersWrong)
+		return ""
+	}
+
+	teamSize, err := strconv.Atoi(parts[1])
+	if err != nil {
+		react(msg, emojiParametersWrong)
+		return ""
+	}
+
+	var members []string
+
+	// only one parameter means we treat it as a group name
+	if len(parts) == 3 {
+		members, err = model.GetGroup(parts[2])
+		if err != nil {
+			react(msg, emojiParametersWrong)
+			return ""
+		}
+	} else {
+		members = parts[2:]
+	}
+
+	teamNames, _ := model.GetGroup(teamNamesGroup)
+
+	returnMessage, err = model.GetRandomTeams(teamSize, members, false, teamNames, true)
+	if err != nil {
+		react(msg, emojiParametersWrong)
+		return ""
+	}
+
+	return returnMessage
+}
+
+func processCommandPut(parts []string, msg slack.MessageInfo) string {
+	if len(parts) < 3 {
+		react(msg, emojiParametersWrong)
+		return ""
+	}
+
+	err := model.SetDBValue(parts[1], parts[2])
+	if err == nil {
+		react(msg, emojiCommandOK)
+	} else {
+		react(msg, emojiCommandError)
+	}
+
+	return ""
+}
+
+func processCommandGet(parts []string, msg slack.MessageInfo) string {
+	var returnMessage string
+
+	if len(parts) < 2 {
+		react(msg, emojiParametersWrong)
+		return ""
+	}
+
+	data, err := model.GetDBValue(parts[1])
+	if err == nil {
+		returnMessage = data
+	} else {
+		react(msg, emojiCommandWarning)
+	}
 	return returnMessage
 }

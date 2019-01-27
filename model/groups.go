@@ -23,7 +23,13 @@
 // Package model contains db access and data manipulation functions
 package model
 
-import "strings"
+import (
+	"errors"
+	"math/rand"
+	"strconv"
+	"strings"
+	"time"
+)
 
 func contains(s []string, e string) bool {
 	for _, a := range s {
@@ -105,4 +111,71 @@ func RemoveFromGroup(name string, members []string) error {
 		return err
 	}
 	return nil
+}
+
+func shuffle(vals []string) {
+	r := rand.New(rand.NewSource(time.Now().Unix()))
+	for len(vals) > 0 {
+		n := len(vals)
+		randIndex := r.Intn(n)
+		vals[n-1], vals[randIndex] = vals[randIndex], vals[n-1]
+		vals = vals[:n-1]
+	}
+}
+
+// GetRandomTeams takes a list of strings and puts them into teams of teamSize
+func GetRandomTeams(teamSize int, members []string, membersCanRepeat bool, teamNames []string, shuffleTeamNames bool) (string, error) {
+	ret := "\n"
+
+	if teamSize > len(members)/2 {
+		return "", errors.New("Team size can't be more than half the group size")
+	}
+
+	shuffle(members)
+
+	if shuffleTeamNames {
+		shuffle(teamNames)
+	}
+
+	d := len(members) % teamSize
+
+	if d != 0 && membersCanRepeat {
+		add := (teamSize - d)
+		newMembers := make([]string, len(members)+add)
+		copy(newMembers, members)
+
+		if d != 0 && membersCanRepeat {
+			for i := 0; i < add; i++ {
+				newMembers[len(members)+i] = members[i]
+			}
+		}
+		members = newMembers
+	}
+
+	teamIndex := 0
+	currentTeamSize := 0
+
+	for i, member := range members {
+		if i%teamSize == 0 {
+			if i == len(members)-1 {
+				ret += "➕ "
+			} else {
+				teamIndex++
+				currentTeamSize = 0
+				if teamIndex-1 < len(teamNames) {
+					ret += "\n" + teamNames[teamIndex-1] + ": "
+				} else {
+					ret += "\nTeam " + strconv.Itoa(teamIndex) + ": "
+				}
+			}
+		}
+		ret += member + " "
+		currentTeamSize++
+	}
+
+	if currentTeamSize < teamSize {
+		ret += "➕❓"
+	}
+
+	return ret, nil
 }

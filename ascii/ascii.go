@@ -29,12 +29,59 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	asciicanvas "github.com/tompng/go-ascii-canvas"
 )
 
-// GetAnimationFrame returns a code-formatted (``) ASCII animation frame. i is looped
-func GetAnimationFrame(i int) string {
+// InitAnimation is called when the ASCII animation's first frame is set up
+type InitAnimation func(string) (string, string)
+
+// UpdateAnimation is called for each subsequent frame
+type UpdateAnimation func(string, string, string)
+
+// DoSharkAnimation iterates through a one-line shark animation. Updates are handled through initialCall and subsequentCall functions
+func DoSharkAnimation(len int, maxTurns int, delay int64, initialCall InitAnimation, subsequentCalls UpdateAnimation) {
+	var shark string
+	var right bool
+
+	right = false
+	shark = getSharkString(0, len, right)
+
+	channel, timestamp := initialCall(shark)
+
+	for turns := 0; turns < maxTurns; turns++ {
+		right = !right
+		for i := 1; i < len-1; i++ {
+			time.Sleep(time.Duration(delay) * time.Millisecond)
+			var newMsg string
+			if right {
+				newMsg = getSharkString(i, len, right)
+			} else {
+				newMsg = getSharkString(len-i, len, right)
+			}
+			subsequentCalls(channel, timestamp, newMsg)
+		}
+	}
+	newMsg := getSharkString(-1, len, right)
+	subsequentCalls(channel, timestamp, newMsg)
+}
+
+// DoFrameAnimation iterates through frames of a string of ASCII pictures. Updates are handled through initialCall and subsequentCall functions
+func DoFrameAnimation(len int, delay int64, initialCall InitAnimation, subsequentCalls UpdateAnimation) {
+	var anim string
+	anim = getAnimationFrame(0)
+	channel, timestamp := initialCall(anim)
+
+	for i := 1; i < len; i++ {
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+		var newMsg string
+		newMsg = getAnimationFrame(i)
+		subsequentCalls(channel, timestamp, newMsg)
+	}
+}
+
+func getAnimationFrame(i int) string {
 	frames := [4]string{
 		"```╔════╤╤╤╤════╗\n" +
 			"║    │││ \\   ║\n" +
@@ -56,8 +103,7 @@ func GetAnimationFrame(i int) string {
 	return frames[i%len(frames)]
 }
 
-// GetSharkString returns the current frame of one-line shark animation
-func GetSharkString(pos int, len int, right bool) string {
+func getSharkString(pos int, len int, right bool) string {
 	var ret string
 
 	for i := 0; i < len; i++ {
