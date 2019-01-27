@@ -1,12 +1,11 @@
-# intro
-
+# slack bot hinko
+## intro
 My weekend project aimed to help me learn Go while having some fun.
 
 Takes advantage of goroutines, channels, function signatures, etc.
 
 Uses a database (leveldb), downloads images from the web and converts them to ASCII, plays simultaneous ASCII animations (by posting and editing a message in the channel), etc. Enjoy!
 
-# hinko
 ## slack bot for random team picking and ASCII fun
 
 A Slack bot written in go with its own database that can help you pick random teams (e.g. for foosball, code reviews, etc.).
