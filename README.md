@@ -1,7 +1,7 @@
 My weekend project aimed to help me learn Go while having some fun.
 Takes advantage of goroutines, channels, function signatures, etc.
 
-# Hinko: Slack Bot for random team picking and ASCII fun
+# hinko: slack bot for random team picking and ASCII fun
 
 A Slack bot written in go with its own database that can help you pick random teams (e.g. for foosball, code reviews, etc.).
 
