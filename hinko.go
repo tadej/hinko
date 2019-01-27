@@ -90,13 +90,6 @@ func respond(msg slack.MessageInfo) {
 }
 
 func processMessage(message string, msg slack.MessageInfo) string {
-	var prefix string
-
-	// mention, tag the user in the channel
-	if !msg.IM {
-		prefix = "<@" + msg.UserID + ">\n"
-	}
-
 	parts := strings.Split(message, " ")
 	if len(parts) > 0 {
 		fn := commands.AcceptedCommands[parts[0]]
