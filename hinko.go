@@ -28,29 +28,32 @@ package main
 import (
 	"errors"
 	"fmt"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"math/rand"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/nlopes/slack"
-	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/tadej/hinko/ascii"
+	"github.com/tadej/hinko/model"
 )
 
 func main() {
-
 	token := os.Getenv("SLACK_TOKEN")
 	api := slack.New(token)
 	rtm := api.NewRTM()
 	go rtm.ManageConnection()
+	model.OpenDatabase("/tmp/model.lvl")
 
-	db, err := leveldb.OpenFile("/tmp/database.lvl", nil)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	setupCloseHandler()
 
+	fmt.Println("Starting Slack API loop")
 Loop:
 	for {
 		select {
@@ -71,7 +74,7 @@ Loop:
 				prefix := fmt.Sprintf("<@%s> ", info.User.ID)
 
 				if ev.User != info.User.ID {
-					respond(db, info.User.ID, rtm, ev, prefix, user.ID, directMessage)
+					respond(info.User.ID, rtm, ev, prefix, user.ID, directMessage)
 				}
 
 			case *slack.RTMError:
@@ -85,26 +88,22 @@ Loop:
 			}
 		}
 	}
-	defer db.Close()
+
+	defer model.CloseDatabase()
 }
 
-func getDBValue(db *leveldb.DB, key string) (string, error) {
-	data, err := db.Get([]byte(key), nil)
-	if err != nil {
-		fmt.Println(err)
-		return "", err
-	}
-	return string(data), nil
-}
-
-func setDBValue(db *leveldb.DB, key string, value string) error {
-	err := db.Put([]byte(key), []byte(value), nil)
-	if err != nil {
-		fmt.Println(err)
-		return err
-	}
-
-	return nil
+// SetupCloseHandler creates a 'listener' on a new goroutine which will notify the
+// program if it receives an interrupt from the OS. We then handle this by calling
+// our clean up procedure and exiting the program.
+func setupCloseHandler() {
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		fmt.Println("\r- Ctrl+C pressed in Terminal")
+		model.CloseDatabase()
+		os.Exit(0)
+	}()
 }
 
 func isIMChannel(api *slack.Client, channel string) bool {
@@ -122,7 +121,7 @@ func isIMChannel(api *slack.Client, channel string) bool {
 	return ret
 }
 
-func respond(db *leveldb.DB, botID string, rtm *slack.RTM, msg *slack.MessageEvent, prefix string, user string, directMessage bool) {
+func respond(botID string, rtm *slack.RTM, msg *slack.MessageEvent, prefix string, user string, directMessage bool) {
 	var response string
 	text := msg.Text
 
@@ -132,58 +131,11 @@ func respond(db *leveldb.DB, botID string, rtm *slack.RTM, msg *slack.MessageEve
 	var mentionedBot = strings.HasPrefix(msg.Text, "<@"+botID+">")
 
 	if directMessage || mentionedBot {
-		response = processMessage(text, user, directMessage, msg, rtm, db)
+		response = processMessage(text, user, directMessage, msg, rtm)
 		if response != "" {
 			rtm.SendMessage(rtm.NewOutgoingMessage(response, msg.Channel))
 		}
 	}
-}
-
-func getSharkString(pos int, len int, right bool) string {
-	var ret string
-
-	for i := 0; i < len; i++ {
-		if pos == i {
-			if right {
-				ret += "\\"
-			} else {
-				ret += "|"
-			}
-		} else if pos == i+1 {
-			if right {
-				ret += "|"
-			} else {
-				ret += "/"
-			}
-
-		} else {
-			ret += "_"
-		}
-	}
-
-	return ret
-}
-
-func getAnimationFrame(i int) string {
-	frames := [4]string{
-		"╔════╤╤╤╤════╗\n" +
-			"║    │││ \\  ║\n" +
-			"║    │││  O  ║\n" +
-			"║    OOO     ║",
-		"╔════╤╤╤╤════╗\n" +
-			"║    ││││    ║\n" +
-			"║    ││││    ║\n" +
-			"║    OOOO    ║",
-		"╔════╤╤╤╤════╗\n" +
-			"║   / │││    ║\n" +
-			"║  O  │││    ║\n" +
-			"║     OOO    ║",
-		"╔════╤╤╤╤════╗\n" +
-			"║    ││││    ║\n" +
-			"║    ││││    ║\n" +
-			"║    OOOO    ║"}
-
-	return frames[i%len(frames)]
 }
 
 func sharkProc(channel string, rtm *slack.RTM, len int, maxTurns int) {
@@ -191,7 +143,7 @@ func sharkProc(channel string, rtm *slack.RTM, len int, maxTurns int) {
 	var right bool
 
 	right = false
-	shark = getSharkString(0, len, right)
+	shark = ascii.GetSharkString(0, len, right)
 
 	retChan, retTimeStamp, err := rtm.PostMessage(channel, slack.MsgOptionText(shark, false), slack.MsgOptionAsUser(true))
 	if err != nil {
@@ -206,9 +158,9 @@ func sharkProc(channel string, rtm *slack.RTM, len int, maxTurns int) {
 			<-timer.C
 			var newMsg string
 			if right {
-				newMsg = getSharkString(i, len, right)
+				newMsg = ascii.GetSharkString(i, len, right)
 			} else {
-				newMsg = getSharkString(len-i, len, right)
+				newMsg = ascii.GetSharkString(len-i, len, right)
 			}
 			_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
 			if err != nil {
@@ -216,7 +168,7 @@ func sharkProc(channel string, rtm *slack.RTM, len int, maxTurns int) {
 			}
 		}
 	}
-	newMsg := getSharkString(-1, len, right)
+	newMsg := ascii.GetSharkString(-1, len, right)
 	_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
 	if err != nil {
 		fmt.Printf("%s\n", err)
@@ -226,7 +178,7 @@ func sharkProc(channel string, rtm *slack.RTM, len int, maxTurns int) {
 
 func animateProc(channel string, rtm *slack.RTM, len int) {
 	var anim string
-	anim = getAnimationFrame(0)
+	anim = ascii.GetAnimationFrame(0)
 	retChan, retTimeStamp, err := rtm.PostMessage(channel, slack.MsgOptionText(anim, false), slack.MsgOptionAsUser(true))
 	if err != nil {
 		fmt.Printf("%s\n", err)
@@ -237,7 +189,7 @@ func animateProc(channel string, rtm *slack.RTM, len int) {
 		timer := time.NewTimer(100 * time.Millisecond)
 		<-timer.C
 		var newMsg string
-		newMsg = getAnimationFrame(i)
+		newMsg = ascii.GetAnimationFrame(i)
 		_, _, _, err = rtm.UpdateMessage(retChan, retTimeStamp, slack.MsgOptionText(newMsg, false), slack.MsgOptionAsUser(true))
 		if err != nil {
 			fmt.Printf("%s\n", err)
@@ -276,6 +228,7 @@ func getInfoMessage() string {
 			"`randompairs group`\n" +
 			"`randomteams teamsize @user1 @user2 @user3 ...`\n" +
 			"`randomteams teamsize group`\n" +
+			"`ascii`\n" +
 			"`shark`\n" +
 			"`animate`\n\n" +
 			" reserved groups: _pairnames_, _teamnames_\n\n" +
@@ -350,90 +303,13 @@ func getRandomTeams(teamSize int, members []string, membersCanRepeat bool, teamN
 	return ret, nil
 }
 
-func getGroup(name string, db *leveldb.DB) ([]string, error) {
-	group, err := getDBValue(db, "[group::"+name+"]")
-
-	if err != nil {
-		return nil, err
-	}
-
-	members := strings.Split(group, " ")
-
-	return members, nil
-}
-
-func setGroup(name string, members []string, db *leveldb.DB) error {
-	err := setDBValue(db, "[group::"+name+"]", strings.Join(members, " "))
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func contains(s []string, e string) bool {
-	for _, a := range s {
-		if a == e {
-			return true
-		}
-	}
-	return false
-}
-
-func addToGroup(name string, members []string, db *leveldb.DB) error {
-	existingGroup, err := getGroup(name, db)
-	if err != nil {
-		return err
-	}
-
-	str := strings.Join(existingGroup, " ")
-
-	str = strings.Trim(str, " ")
-
-	for _, m := range members {
-		if !contains(existingGroup, m) {
-			str += " " + m
-		}
-	}
-
-	str = strings.Trim(str, " ")
-
-	err = setDBValue(db, "[group::"+name+"]", str)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func removeFromGroup(name string, members []string, db *leveldb.DB) error {
-	existingGroup, err := getGroup(name, db)
-	if err != nil {
-		return err
-	}
-
-	str := ""
-
-	for _, m := range existingGroup {
-		if !contains(members, m) {
-			str += " " + m
-		}
-	}
-
-	str = strings.Trim(str, " ")
-
-	err = setDBValue(db, "[group::"+name+"]", str)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func processMessage(message string, userID string, directMessage bool, msg *slack.MessageEvent, rtm *slack.RTM, db *leveldb.DB) string {
+func processMessage(message string, userID string, directMessage bool, msg *slack.MessageEvent, rtm *slack.RTM) string {
 	var returnMessage string
 	var prefix string
 
 	// mention, tag the user in the channel
 	if !directMessage {
-		prefix = "<@" + userID + "> "
+		prefix = "<@" + userID + ">\n"
 	}
 
 	parts := strings.Split(message, " ")
@@ -447,6 +323,7 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 		"randompairs": true,
 		"randomteams": true,
 		"group":       true,
+		"ascii":       true,
 	}
 
 	emojiCommandNotFound := "shrug"                  // 🤷‍♀️
@@ -464,6 +341,10 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 	case "help":
 		returnMessage = getInfoMessage()
 
+	case "ascii":
+
+		returnMessage = ascii.ImageToASCII(parts[1])
+
 	case "group":
 		if len(parts) < 3 {
 			addReaction(msg, emojiParametersWrong, rtm)
@@ -476,20 +357,20 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 		case "list":
 
 		case "create":
-			err := setGroup(groupName, parts[3:], db)
+			err := model.SetGroup(groupName, parts[3:])
 			if err != nil {
 				addReaction(msg, emojiParametersWrong, rtm)
 				return ""
 			}
 		case "add":
-			err := addToGroup(groupName, parts[3:], db)
+			err := model.AddToGroup(groupName, parts[3:])
 			if err != nil {
 				addReaction(msg, emojiParametersWrong, rtm)
 				return ""
 			}
 
 		case "remove":
-			err := removeFromGroup(groupName, parts[3:], db)
+			err := model.RemoveFromGroup(groupName, parts[3:])
 			if err != nil {
 				addReaction(msg, emojiParametersWrong, rtm)
 				return ""
@@ -502,7 +383,7 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 
 		addReaction(msg, emojiCommandOK, rtm)
 
-		groupTest, err := getGroup(parts[1], db)
+		groupTest, err := model.GetGroup(parts[1])
 		if err != nil {
 			addReaction(msg, emojiParametersWrong, rtm)
 			return ""
@@ -518,7 +399,7 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 		var err error
 		// only one parameter means group name
 		if len(parts) == 2 {
-			members, err = getGroup(parts[1], db)
+			members, err = model.GetGroup(parts[1])
 			if err != nil {
 				addReaction(msg, emojiParametersWrong, rtm)
 				return ""
@@ -527,7 +408,7 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 			members = parts[1:]
 		}
 
-		teamNames, _ := getGroup("pairnames", db)
+		teamNames, _ := model.GetGroup("pairnames")
 
 		returnMessage, err = getRandomTeams(2, members, true, teamNames, false)
 		if err != nil {
@@ -551,7 +432,7 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 
 		// only one parameter means group name
 		if len(parts) == 3 {
-			members, err = getGroup(parts[2], db)
+			members, err = model.GetGroup(parts[2])
 			if err != nil {
 				addReaction(msg, emojiParametersWrong, rtm)
 				return ""
@@ -560,7 +441,7 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 			members = parts[2:]
 		}
 
-		teamNames, _ := getGroup("teamnames", db)
+		teamNames, _ := model.GetGroup("teamnames")
 
 		returnMessage, err = getRandomTeams(teamSize, members, false, teamNames, true)
 		if err != nil {
@@ -574,7 +455,7 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 			return ""
 		}
 
-		err := setDBValue(db, parts[1], strings.TrimPrefix(message, parts[0]+" "+parts[1]+" "))
+		err := model.SetDBValue(parts[1], strings.TrimPrefix(message, parts[0]+" "+parts[1]+" "))
 		if err == nil {
 			addReaction(msg, emojiCommandOK, rtm)
 		} else {
@@ -587,7 +468,7 @@ func processMessage(message string, userID string, directMessage bool, msg *slac
 			return ""
 		}
 
-		data, err := getDBValue(db, parts[1])
+		data, err := model.GetDBValue(parts[1])
 		if err == nil {
 			returnMessage = data
 		} else {
