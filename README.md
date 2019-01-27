@@ -1,3 +1,5 @@
+# intro
+
 My weekend project aimed to help me learn Go while having some fun.
 
 Takes advantage of goroutines, channels, function signatures, etc.
