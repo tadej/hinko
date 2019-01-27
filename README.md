@@ -1,3 +1,5 @@
+![travis](https://travis-ci.org/tadej/hinko.svg?branch=master "build status")
+
 # Hinko (slack bot)
 ## About the project
 My weekend project aimed to help me learn Go while having some fun.
