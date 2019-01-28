@@ -127,10 +127,41 @@ func getSharkString(pos int, len int, right bool) string {
 	return ":shark: `" + ret + "`"
 }
 
+func clampLongerRectangleSize(w float64, h float64, maxLonger float64, maxShorter float64) (float64, float64) {
+	ratio := h / w
+	var w1 float64
+	var h1 float64
+
+	if w > h {
+		w1 = maxLonger
+		h1 = ratio * w1
+		if h1 > maxShorter {
+			h1 = maxShorter
+			w1 = h1 / ratio
+		}
+	} else {
+		h1 = maxLonger
+		w1 = h1 / ratio
+		if w1 > maxShorter {
+			w1 = maxShorter
+			h1 = w1 * ratio
+		}
+	}
+
+	return w1, h1
+}
+
+func getXYCorrelatedWithAB(x int, y int, A float64, B float64) (int, int) {
+	if A > B {
+		return x, y
+	}
+	return y, x
+}
+
 // ImageToASCII downloads an image from a URL and returns a code-formatted (``) ASCII representation
 func ImageToASCII(url string) (string, error) {
 
-	// TG: determined by experimentation that Slack doesn't allow code segments larger than 100x70
+	// TG: determined by experimentation that Slack doesn't allow code segments larger than 100x70 or 70x100
 	var slackWidthLimit float64 = 100
 	var slackHeightLimit float64 = 70
 
@@ -153,33 +184,13 @@ func ImageToASCII(url string) (string, error) {
 		return "", err
 	}
 
-	var ratio float64
-	ratio = float64(img.Height) / float64(img.Width)
+	width, height := clampLongerRectangleSize(float64(img.Width), float64(img.Height), slackWidthLimit, slackHeightLimit)
 
-	var width float64
-	var height float64
+	bufferW, bufferH := getXYCorrelatedWithAB(int(slackWidthLimit), int(slackHeightLimit), width, height)
 
-	var canvas *asciicanvas.ImageBuffer
+	canvas := asciicanvas.NewImageBuffer(bufferW, bufferH)
 
-	if img.Width > img.Height {
-		width = slackWidthLimit
-		height = slackWidthLimit * ratio
-		if height > slackHeightLimit {
-			height = slackHeightLimit
-			width = slackHeightLimit / ratio
-		}
-		canvas = asciicanvas.NewImageBuffer(int(slackWidthLimit), int(slackHeightLimit))
-	} else {
-		height = slackWidthLimit
-		width = slackWidthLimit / ratio
-		if width > slackHeightLimit {
-			width = slackHeightLimit
-			height = slackHeightLimit * ratio
-		}
-		canvas = asciicanvas.NewImageBuffer(int(slackHeightLimit), int(slackWidthLimit))
-	}
-
-	canvas.Draw(img, 0, 0, width, height) // img, x, y, w, h
+	canvas.Draw(img, 0, 0, width, height)
 
 	str := canvas.String()
 	str = strings.Replace(str, "`", "'", -1)
