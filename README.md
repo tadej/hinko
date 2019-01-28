@@ -15,6 +15,8 @@ It features a number of ASCII art and animation experiments, along with the abil
 
 The bot uses reactions to confirm commands (or say they don't work) to not spam the channel.
 
+![screenshot](https://github.com/tadej/hinko/blob/master/images/hinko-screen-3.png "screenshot")
+
 Try the following commands:
 ```help
 put key value
