@@ -1,4 +1,4 @@
-![travis](https://travis-ci.org/tadej/hinko.svg?branch=master "build status")
+[![Build Status](https://travis-ci.org/tadej/hinko.svg?branch=master)](https://travis-ci.org/tadej/hinko)
 
 # Hinko (slack bot)
 ## About the project
