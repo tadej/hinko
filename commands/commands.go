@@ -184,7 +184,7 @@ func ProcessCommandGroup(parts []string, msg slack.MessageInfo) string {
 		return ""
 	}
 
-	fn := AcceptedGroupSubCommands[parts[2]]
+	fn := AcceptedGroupSubCommands[strings.ToLower(parts[2])]
 
 	if fn != nil {
 		return fn(parts, msg)
