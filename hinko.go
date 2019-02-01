@@ -92,7 +92,7 @@ func respond(msg slack.MessageInfo) {
 func processMessage(message string, msg slack.MessageInfo) string {
 	parts := strings.Split(message, " ")
 	if len(parts) > 0 {
-		fn := commands.[AcceptedCommandsstrings.ToLower(parts[0])]
+		fn := commands.AcceptedCommands[strings.ToLower(parts[0])]
 		if fn != nil {
 			return fn(parts, msg)
 		}
