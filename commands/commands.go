@@ -24,6 +24,7 @@
 package commands
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -46,6 +47,7 @@ var AcceptedCommands = map[string]ProcessCommand{
 	"randomteams": ProcessCommandRandomTeams,
 	"group":       ProcessCommandGroup,
 	"ascii":       ProcessCommandASCII,
+	"score":       ProcessCommandScore,
 }
 
 // AcceptedGroupSubCommands - accepted text group subcommands with their corresponding processor functions
@@ -55,6 +57,14 @@ var AcceptedGroupSubCommands = map[string]ProcessCommand{
 	"add":    ProcessCommandGroupAdd,
 	"remove": ProcessCommandGroupRemove,
 	"list":   ProcessCommandGroupList,
+}
+
+// AcceptedScoreSubCommands - accepted score subcommands with their corresponding processor functions
+var AcceptedScoreSubCommands = map[string]ProcessCommand{
+	"set":   ProcessCommandScoreSet,
+	"add":   ProcessCommandScoreSet,
+	"get":   ProcessCommandScoreGet,
+	"reset": ProcessCommandScoreReset,
 }
 
 // EmojiCommandNotFound ‍‍🤷‍♀️
@@ -89,6 +99,9 @@ func ProcessCommandHelp(parts []string, msg slack.MessageInfo) string {
 			"`group groupname create @user1 @user2 @user3 ...`\n" +
 			"`group groupname add @user1 @user2 @user3 ...`\n" +
 			"`group groupname remove @user1 @user2 @user3 ...`\n" +
+			"`score add team1:team2 score1:score2`\n" +
+			"`score get team2:team1`\n" +
+			"`score reset team2:team1`\n" +
 			"`randompairs @user1 @user2 @user3 ...`\n" +
 			"`randompairs group`\n" +
 			"`randomteams teamsize @user1 @user2 @user3 ...`\n" +
@@ -190,7 +203,114 @@ func ProcessCommandGroup(parts []string, msg slack.MessageInfo) string {
 		return fn(parts, msg)
 	}
 
-	React(msg, EmojiCommandOK)
+	React(msg, EmojiCommandError)
+	return ""
+}
+
+// ProcessCommandScore decides which score processing function to call
+func ProcessCommandScore(parts []string, msg slack.MessageInfo) string {
+	if len(parts) < 3 {
+		React(msg, EmojiParametersWrong)
+		return ""
+	}
+
+	fn := AcceptedScoreSubCommands[strings.ToLower(parts[1])]
+
+	if fn != nil {
+		return fn(parts, msg)
+	}
+
+	React(msg, EmojiCommandError)
+	return ""
+}
+
+func teamsNamesFromString(input string) (string, string, error) {
+	input = strings.ToUpper(input)
+	str := strings.Split(input, ":")
+	if len(str) != 2 {
+		return "", "", errors.New("can't get team names from string")
+	}
+
+	return str[0], str[1], nil
+}
+
+func scoresFromString(input string) (int, int, error) {
+	str := strings.Split(input, ":")
+	if len(str) != 2 {
+		return -1, -1, errors.New("can't get team names from string")
+	}
+
+	sc1, err := strconv.Atoi(str[0])
+
+	if err != nil {
+		return -1, -1, err
+	}
+
+	sc2, err := strconv.Atoi(str[1])
+
+	if err != nil {
+		return -1, -1, err
+	}
+
+	return sc1, sc2, nil
+}
+
+// ProcessCommandScoreSet sets a new score with score set team1:team2 score1:score2
+func ProcessCommandScoreSet(parts []string, msg slack.MessageInfo) string {
+	if len(parts) < 4 {
+		React(msg, EmojiParametersWrong)
+		return ""
+	}
+
+	team1, team2, err1 := teamsNamesFromString(parts[2])
+	score1, score2, err2 := scoresFromString(parts[3])
+	var err error
+	if err1 == nil && err2 == nil {
+		err = model.AddScore(team1, team2, score1, score2)
+		if err == nil {
+			React(msg, EmojiCommandOK)
+			return ""
+		}
+	}
+
+	React(msg, EmojiParametersWrong)
+
+	return ""
+}
+
+// ProcessCommandScoreReset resets the score for team1:team2
+func ProcessCommandScoreReset(parts []string, msg slack.MessageInfo) string {
+	team1, team2, err := teamsNamesFromString(parts[2])
+
+	if err == nil {
+		err = model.ResetScore(team1, team2)
+		if err == nil {
+			React(msg, EmojiCommandOK)
+			return ""
+		}
+	}
+
+	React(msg, EmojiParametersWrong)
+
+	return ""
+}
+
+// ProcessCommandScoreGet gets the scores for team1:team2
+func ProcessCommandScoreGet(parts []string, msg slack.MessageInfo) string {
+	team1, team2, err1 := teamsNamesFromString(parts[2])
+
+	if err1 == nil {
+		scoreInfo, err := model.GetScores(team1, team2)
+
+		if err != nil {
+			React(msg, EmojiParametersWrong)
+		} else {
+			return model.GetScoreMessage(scoreInfo)
+		}
+	} else {
+		React(msg, EmojiParametersWrong)
+	}
+
 	return ""
 }
 

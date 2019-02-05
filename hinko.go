@@ -38,12 +38,15 @@ import (
 )
 
 func main() {
+	fmt.Println("Hinko (c) Tadej Gregorcic")
 	token := os.Getenv("SLACK_TOKEN")
 	slack.Init(token)
-	model.OpenDatabase(os.Getenv("DATABASE_PATH"))
+	dbPath := os.Getenv("DATABASE_PATH")
+	fmt.Println("Opening database at " + dbPath)
+	model.OpenDatabase(dbPath)
 	initInterruptHandler()
 
-	fmt.Println("Starting Slack API loop")
+	fmt.Println("Starting Slack API listener")
 
 	c := make(chan slack.MessageInfo)
 	go slack.MessageLoop(c)
