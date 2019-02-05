@@ -316,14 +316,14 @@ func GetScoreMessage(score ScoreInfo) string {
 	var ret string
 	ret += "*" + score.Team1 + "*"
 	if score.Points.Team1 > score.Points.Team2 {
-		ret += " is currently winning against "
+		ret += " is currently ahead of "
 	} else if score.Points.Team1 < score.Points.Team2 {
-		ret += " is currently losing to "
+		ret += " is currently trailing behind "
 	} else {
 		ret += " is currently tied with "
 	}
 	ret += "*" + score.Team2 + "*"
-	ret += " at " + scoreToString(score.Points) + "."
+	ret += " with " + scoreToString(score.Points) + "."
 	ret += "\nHere are the latest standings:"
 
 	for i := 0; i < len(score.Scores); i++ {
