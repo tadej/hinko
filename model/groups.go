@@ -340,6 +340,7 @@ func GetScoreMessage(score ScoreInfo) string {
 
 // ResetScore resets the score for TEAM1:TEAM2 or TEAM1:TEAM2
 func ResetScore(team1 string, team2 string) error {
+	team1, team2, _ = orderTeamNames(team1, team2)
 	err := SetDBValue(getScoreTag(team1, team2), "")
 	return err
 }
