@@ -15,3 +15,7 @@ database.lvl/
 
 .DS_Store
 .DS_Store
+
+.vscode
+.vscode/launch.json
+.vscode/settings.json
