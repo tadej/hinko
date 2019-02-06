@@ -85,7 +85,7 @@ Loop:
 				fmt.Printf("Error: %s\n\n", ev.Error())
 
 			case *slack.InvalidAuthEvent:
-				fmt.Printf("Invalid credentials")
+				fmt.Println("Invalid credentials")
 				break Loop
 
 			default:

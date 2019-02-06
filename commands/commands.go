@@ -102,6 +102,7 @@ func ProcessCommandHelp(parts []string, msg slack.MessageInfo) string {
 			"`score add team1:team2 score1:score2`\n" +
 			"`score get team2:team1`\n" +
 			"`score reset team2:team1`\n" +
+			"`score reset team2:team1 score2:score1`\n" +
 			"`randompairs @user1 @user2 @user3 ...`\n" +
 			"`randompairs group`\n" +
 			"`randomteams teamsize @user1 @user2 @user3 ...`\n" +
@@ -237,19 +238,19 @@ func teamsNamesFromString(input string) (string, string, error) {
 func scoresFromString(input string) (int, int, error) {
 	str := strings.Split(input, ":")
 	if len(str) != 2 {
-		return -1, -1, errors.New("can't get team names from string")
+		return 0, 0, errors.New("can't get team names from string")
 	}
 
 	sc1, err := strconv.Atoi(str[0])
 
 	if err != nil {
-		return -1, -1, err
+		return 0, 0, err
 	}
 
 	sc2, err := strconv.Atoi(str[1])
 
 	if err != nil {
-		return -1, -1, err
+		return 0, 0, err
 	}
 
 	return sc1, sc2, nil
@@ -282,8 +283,15 @@ func ProcessCommandScoreSet(parts []string, msg slack.MessageInfo) string {
 func ProcessCommandScoreReset(parts []string, msg slack.MessageInfo) string {
 	team1, team2, err := teamsNamesFromString(parts[2])
 
+	score1 := 0
+	score2 := 0
+
 	if err == nil {
-		err = model.ResetScore(team1, team2)
+		if len(parts) >= 4 {
+			score1, score2, err = scoresFromString(parts[3])
+		}
+
+		err = model.ResetScore(team1, team2, score1, score2)
 		if err == nil {
 			React(msg, EmojiCommandOK)
 			return ""

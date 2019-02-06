@@ -311,37 +311,77 @@ func scoreToString(score Score) string {
 	return strconv.Itoa(score.Team1) + ":" + strconv.Itoa(score.Team2)
 }
 
+func getVerbToBe(input string) string {
+	if strings.HasSuffix(strings.ToLower(input), "s") {
+		return "are"
+	}
+	return "is"
+}
+
 // GetScoreMessage returns a formatted string describing the score standing
 func GetScoreMessage(score ScoreInfo) string {
 	var ret string
-	ret += "*" + score.Team1 + "*"
+	prefix := ""
+
+	ret += "" + score.Team1 + " "
 	if score.Points.Team1 > score.Points.Team2 {
-		ret += " is currently ahead of "
+		prefix += "*" + score.Team1 + "*  :trophy:\n"
+		prefix += "*" + score.Team2 + "*  \n"
+
+		ret += getVerbToBe(score.Team1) + " currently ahead of "
 	} else if score.Points.Team1 < score.Points.Team2 {
-		ret += " is currently trailing behind "
+		prefix += "*" + score.Team2 + "*  :trophy:\n"
+		prefix += "*" + score.Team1 + "*  \n"
+
+		ret += getVerbToBe(score.Team1) + " currently trailing behind "
 	} else {
-		ret += " is currently tied with "
-	}
-	ret += "*" + score.Team2 + "*"
-	ret += " with " + scoreToString(score.Points) + "."
-	ret += "\nHere are the latest standings:"
+		prefix += "*" + score.Team1 + "*  :second_place_medal:\n"
+		prefix += "*" + score.Team2 + "*  :second_place_medal:\n"
 
-	for i := 0; i < len(score.Scores); i++ {
-		timestr := ""
-		t, err := time.Parse(time.RFC1123, score.Scores[i].Timestamp)
-		if err == nil {
-			timestr = " on " + t.Format(time.RFC1123)
+		ret += getVerbToBe(score.Team1) + " currently tied with "
+	}
+	ret += "" + score.Team2 + ""
+	ret += ": " + scoreToString(score.Points) + "."
+
+	if len(score.Scores) > 0 {
+		ret += "\n\nHere are the latest match results:"
+
+		for i := len(score.Scores) - 1; i >= 0; i-- {
+			timestr := ""
+			t, err := time.Parse(time.RFC1123, score.Scores[i].Timestamp)
+			if err == nil {
+				timestr = " on " + t.Format(time.RFC1123)
+			}
+			ret += "\n`" + scoreToString(score.Scores[i]) + timestr + "`"
 		}
-		ret += "\n`" + scoreToString(score.Scores[i]) + timestr + "`"
 	}
 
-	return ret
+	prefix += "\n\n"
+
+	return prefix + ret
 }
 
 // ResetScore resets the score for TEAM1:TEAM2 or TEAM1:TEAM2
-func ResetScore(team1 string, team2 string) error {
-	team1, team2, _ = orderTeamNames(team1, team2)
-	err := SetDBValue(getScoreTag(team1, team2), "")
+func ResetScore(team1 string, team2 string, score1 int, score2 int) error {
+	var reverse bool
+	team1, team2, reverse = orderTeamNames(team1, team2)
+
+	if reverse {
+		tmp := score1
+		score1 = score2
+		score2 = tmp
+	}
+
+	var scoreInfo ScoreInfo
+	scoreInfo.Team1 = team1
+	scoreInfo.Team2 = team2
+	scoreInfo.Points = Score{Team1: score1, Team2: score2, Timestamp: ""}
+
+	js, err := scoreInfoToJSON(scoreInfo)
+
+	if err == nil {
+		err = SetDBValue(getScoreTag(team1, team2), js)
+	}
 	return err
 }
 
