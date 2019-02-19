@@ -100,6 +100,7 @@ func ProcessCommandHelp(parts []string, msg slack.MessageInfo) string {
 			"`group groupname add @user1 @user2 @user3 ...`\n" +
 			"`group groupname remove @user1 @user2 @user3 ...`\n" +
 			"`score add team1:team2 score1:score2`\n" +
+			"`score add team1:team2 score1:score2 * (will return current score)`\n" +
 			"`score get team2:team1`\n" +
 			"`score reset team2:team1`\n" +
 			"`score reset team2:team1 score2:score1`\n" +
@@ -270,6 +271,12 @@ func ProcessCommandScoreSet(parts []string, msg slack.MessageInfo) string {
 		err = model.AddScore(team1, team2, score1, score2)
 		if err == nil {
 			React(msg, EmojiCommandOK)
+
+			// if last parameter is asterisk, return current score
+			if len(parts) >= 5 && parts[4] == "*" {
+				return ProcessCommandScoreGet(parts[:3], msg)
+			}
+
 			return ""
 		}
 	}
