@@ -335,8 +335,8 @@ func GetScoreMessage(score ScoreInfo) string {
 
 		ret += getVerbToBe(score.Team1) + " currently trailing behind "
 	} else {
-		prefix += "*" + score.Team1 + "*  :second_place_medal:\n"
-		prefix += "*" + score.Team2 + "*  :second_place_medal:\n"
+		prefix += "*" + score.Team1 + "*  :first_place_medal:\n"
+		prefix += "*" + score.Team2 + "*  :first_place_medal:\n"
 
 		ret += getVerbToBe(score.Team1) + " currently tied with "
 	}
@@ -346,13 +346,19 @@ func GetScoreMessage(score ScoreInfo) string {
 	if len(score.Scores) > 0 {
 		ret += "\n\nHere are the latest match results:"
 
-		for i := len(score.Scores) - 1; i >= 0; i-- {
+		gamesPlayed := len(score.Scores)
+		if gamesPlayed > 10 {
+			gamesPlayed = 10
+		}
+
+		for i := 1; i <= gamesPlayed; i++ {
 			timestr := ""
-			t, err := time.Parse(time.RFC1123, score.Scores[i].Timestamp)
+			j := len(score.Scores) - i
+			t, err := time.Parse(time.RFC1123, score.Scores[j].Timestamp)
 			if err == nil {
 				timestr = " on " + t.Format(time.RFC1123)
 			}
-			ret += "\n`" + scoreToString(score.Scores[i]) + timestr + "`"
+			ret += "\n`" + scoreToString(score.Scores[j]) + timestr + "`"
 		}
 	}
 
